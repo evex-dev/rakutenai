@@ -100,6 +100,13 @@ export class Thread {
     return new Thread(id, user, await Thread.connectWS(id, user))
   }
 
+  async uploadFile(opts: {
+    file: File
+    isImage: boolean
+  }) {
+    this.#user.uploadFile({ file: opts.file, isImage: opts.isImage, threadId: this.id })
+  }
+
   async *sendMessage(message: {
     mode: 'USER_INPUT' | 'DEEP_THINK' | 'AI_READ'
     contents: (
