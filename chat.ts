@@ -64,15 +64,15 @@ export class Thread {
       start: (controller) => {
         // FIXME: 場合によっては初っ端のメッセージを取りこぼすけど知らない
         ws.onmessage = (event) => {
-          controller.enqueue(JSON.parse(event.data) as ChatResponseStream);
+          controller.enqueue(JSON.parse(event.data) as ChatResponseStream)
         };
 
         ws.onerror = (error) => {
-          controller.error(error);
+          controller.error(error)
         };
 
         ws.onclose = () => {
-          controller.close();
+          controller.close()
         };
       },
       cancel: () => this.#ws.close(), // 一心同体
