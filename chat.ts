@@ -108,6 +108,10 @@ export class Thread {
     | { type: 'reasoning-delta'; text: string }
     | { type: 'done' }
     | { type: 'notification'; data: any }
+    | { type: 'tool-call'; data: Array<{
+        contentType: "TEXT" | "SUMMARY_TEXT";
+        textData: { text: string; };
+      }> }
   > {
     const messageId = crypto.randomUUID()
     this.#ws.send(
@@ -175,8 +179,7 @@ export class Thread {
           chunk.webSocket.payload.action === 'EVENT'
         ) {
           if (
-            chunk.webSocket.payload.data.chatResponseStatus === 'APPEND' ||
-            chunk.webSocket.payload.data.chatResponseStatus === 'TOOL_CALL'
+            chunk.webSocket.payload.data.chatResponseStatus === 'APPEND'
           ) {
             const contents = chunk.webSocket.payload.data.contents
             for (const content of contents) {
@@ -209,6 +212,13 @@ export class Thread {
                   content,
                 )
               }
+            }
+          } else if (
+            chunk.webSocket.payload.data.chatResponseStatus === 'TOOL_CALL'
+          ) {
+            yield {
+              type: 'tool-call',
+              data: chunk.webSocket.payload.data.contents
             }
           } else if (
             chunk.webSocket.payload.data.chatResponseStatus === 'DONE'
