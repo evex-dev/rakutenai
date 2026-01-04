@@ -102,9 +102,9 @@ export class Thread {
 
   async uploadFile(opts: {
     file: File
-    isImage: boolean
+    isImage?: boolean
   }) {
-    this.#user.uploadFile({ file: opts.file, isImage: opts.isImage, threadId: this.id })
+    return this.#user.uploadFile({ file: opts.file, isImage: opts.isImage, threadId: this.id })
   }
 
   async *sendMessage(message: {
@@ -118,11 +118,7 @@ export class Thread {
           type: 'file'
           file: UploadedFile
         }
-      | {
-          type: 'image'
-          file: UploadedFile
-      }
-    )[]
+      )[]
   }): AsyncGenerator<
     | { type: 'ack' }
     | { type: 'text-delta'; text: string }
