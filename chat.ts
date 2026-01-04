@@ -56,31 +56,47 @@ export class Thread {
   readonly id: string
   #user: User
   #ws: WebSocket
+  #stream: ReadableStream<ChatResponseStream>
   #streamReader: ReadableStreamDefaultReader<ChatResponseStream>
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
-    // 時々WebSocketが切れたら繋ぎ直す?
     this.#ws = ws
-    this.#streamReader = new ReadableStream<ChatResponseStream>({
-      start: (controller) => {
-        // FIXME: 場合によっては初っ端のメッセージを取りこぼすけど知らない
-        ws.onmessage = (event) => {
-          controller.enqueue(JSON.parse(event.data) as ChatResponseStream)
-        };
 
-        ws.onerror = (error) => {
-          controller.error(error)
-        };
+    this.#stream = new ReadableStream<ChatResponseStream>({
+      start: async (controller) => {
+        while (true) {
+          try {
+            // 現在のWSの終了を待機するPromiseを作成
+            const closed = new Promise((resolve, reject) => {
+              // FIXME: 場合によっては初っ端のメッセージを取りこぼすけど知らない
+              this.#ws.onmessage = (e) => controller.enqueue(JSON.parse(e.data) as ChatResponseStream)
+              this.#ws.onerror = reject
+              this.#ws.onclose = resolve
+            })
 
-        ws.onclose = () => {
-          controller.close()
-        };
+            await closed
+
+            this.#ws = await Thread.connectWS(user)
+          } catch (err) {
+            this.#ws.onerror = null
+            this.#ws.onclose = null
+            controller.error(err)
+            break
+          }
+        }
       },
-      cancel: () => this.#ws.close(), // 一心同体
-    }).getReader()
+      cancel: () => {
+        this.#ws.onerror = null
+        this.#ws.onclose = null
+        this.#ws.close() // 一心同体
+      },
+    })
+
+    this.#streamReader = this.#stream.getReader()
   }
-  static async connect(id: string, user: User): Promise<Thread> {
+
+  static async connectWS(user: User): Promise<WebSocket> {
     const WS_PATH = `/ws/v1/chat?deviceId=${encodeURIComponent(user.deviceId)}`
     const url = await getSignedWsUrl(WS_PATH, user.accessToken)
     const ws = new WebSocket(url)
@@ -88,7 +104,11 @@ export class Thread {
       ws.onopen = () => resolve()
       ws.onerror = reject
     })
-    return new Thread(id, user, ws)
+    return ws
+  }
+
+  static async connect(id: string, user: User): Promise<Thread> {
+    return new Thread(id, user, await Thread.connectWS(user))
   }
 
   async *sendMessage(message: {
@@ -114,6 +134,7 @@ export class Thread {
     | { type: 'reasoning-delta'; text: string }
     | { type: 'done' }
     | { type: 'notification'; data: any }
+    | { type: 'disconnected' }
     | { type: 'tool-call'; data: Array<{
         contentType: "TEXT" | "SUMMARY_TEXT";
         textData: { text: string; };
@@ -175,8 +196,8 @@ export class Thread {
     )
     while (true) {
       const { value: chunk, done } = await this.#streamReader.read();
-      if (done) {
-        yield { type: 'done' } as const // 適当
+      if (done) { // 自動で再接続するのでこれが流れるはずは無い
+        yield { type: 'disconnected' } as const
         return
       }
       if (chunk.webSocket.type === 'ACK') {
@@ -262,6 +283,7 @@ export class Thread {
     }
   }
   [Symbol.dispose]() {
+    this.#stream.cancel()
     this.#ws.close()
   }
   close() {
