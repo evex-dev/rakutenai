@@ -46,12 +46,28 @@ export type ChatResponseStream = {
                 messageId: string
                 reqMessageId: string
                 language: 'ja'
-                contents: {
-                  contentType: 'TEXT' | 'SUMMARY_TEXT'
-                  textData: {
-                    text: string
+                contents: (
+                  {
+                    contentType: 'TEXT' | 'SUMMARY_TEXT'
+                    textData: {
+                      text: string
+                    }
                   }
-                }[]
+                | {
+                    contentType: 'OUTPUT_IMAGE'
+                    outputImageData: {
+                      imageGens: { // 配列だけど生成は1回1枚? 複数の画像があっても区別不可
+                        thumbnail: string // 生成中のプレビューのURL
+                        preview?: string // 生成完了した画像のURL
+                        index: number // 0から始まる
+                        total: number // indexの最大+1 === total
+                        width: number
+                        height: number
+                      }[]
+                      // NOTE: APIサーバーは何故か画像を application/octect-stream で返す
+                    }
+                  }
+                )[]
                 trace: {
                   id: string
                 }
