@@ -32,10 +32,12 @@ export class User {
   async uploadFile(opts: {
     file: File
     threadId?: string
+    isImage?: boolean
   }): Promise<UploadedFile> {
     const res = await uploadFile(this.deviceId, this.accessToken, {
       file: opts.file,
       threadId: opts.threadId ?? crypto.randomUUID(),
+      isImage: opts.isImage,
     })
     return {
       fileId: res.fileId,
@@ -59,7 +61,6 @@ export class Thread {
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
-    // 時々WebSocketが切れたら繋ぎ直す?
     this.#ws = ws
 
     this.#stream = new ReadableStream<ChatResponseStream>({
@@ -121,6 +122,10 @@ export class Thread {
           type: 'file'
           file: UploadedFile
         }
+      | {
+          type: 'image'
+          file: UploadedFile
+      }
     )[]
   }): AsyncGenerator<
     | { type: 'ack' }
@@ -130,6 +135,12 @@ export class Thread {
     | { type: 'done' }
     | { type: 'notification'; data: any }
     | { type: 'disconnected' }
+    | { type: 'tool-call'; data: Array<{
+        contentType: "TEXT" | "SUMMARY_TEXT";
+        textData: { text: string; };
+      }> }
+    | { type: 'image-thumbnail'; url: string }
+    | { type: 'image'; url: string }
   > {
     const messageId = crypto.randomUUID()
     this.#ws.send(
@@ -197,8 +208,7 @@ export class Thread {
           chunk.webSocket.payload.action === 'EVENT'
         ) {
           if (
-            chunk.webSocket.payload.data.chatResponseStatus === 'APPEND' ||
-            chunk.webSocket.payload.data.chatResponseStatus === 'TOOL_CALL'
+            chunk.webSocket.payload.data.chatResponseStatus === 'APPEND'
           ) {
             const contents = chunk.webSocket.payload.data.contents
             for (const content of contents) {
@@ -223,6 +233,12 @@ export class Thread {
                   type: 'reasoning-delta',
                   text: content.textData.text ?? '',
                 } as const
+              } else if (content.contentType === 'OUTPUT_IMAGE') {
+                const img = content.outputImageData.imageGens[0]
+                if(img) {
+                  yield { type: 'image-thumbnail', url: img.thumbnail }
+                  if(img.preview) yield { type: 'image', url: img.preview }
+                }
               } else {
                 console.warn(
                   '\n[Unsupported content type:',
@@ -231,6 +247,13 @@ export class Thread {
                   content,
                 )
               }
+            }
+          } else if (
+            chunk.webSocket.payload.data.chatResponseStatus === 'TOOL_CALL'
+          ) {
+            yield {
+              type: 'tool-call',
+              data: chunk.webSocket.payload.data.contents
             }
           } else if (
             chunk.webSocket.payload.data.chatResponseStatus === 'DONE'
