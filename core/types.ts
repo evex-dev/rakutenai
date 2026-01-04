@@ -234,7 +234,7 @@ export async function uploadFile(
   requestData: {
     file: File
     threadId: string
-    isImage: boolean
+    isImage?: boolean
   },
 ) {
   const endpoint = '/api/v1/files/upload'

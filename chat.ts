@@ -32,10 +32,12 @@ export class User {
   async uploadFile(opts: {
     file: File
     threadId?: string
+    isImage?: boolean
   }): Promise<UploadedFile> {
     const res = await uploadFile(this.deviceId, this.accessToken, {
       file: opts.file,
       threadId: opts.threadId ?? crypto.randomUUID(),
+      isImage: opts.isImage,
     })
     return {
       fileId: res.fileId,
