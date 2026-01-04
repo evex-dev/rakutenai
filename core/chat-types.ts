@@ -138,6 +138,13 @@ export type ChatRequestMessage = {
                 name: string
               }
             }
+          | {
+              contentType: 'INPUT_IMAGE'
+              inputImageData: {
+                src: string
+                resourceId: string
+              }
+          }
         )[]
         retry: false
         debug: false

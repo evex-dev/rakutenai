@@ -234,6 +234,7 @@ export async function uploadFile(
   requestData: {
     file: File
     threadId: string
+    isImage?: boolean
   },
 ) {
   const endpoint = '/api/v1/files/upload'
@@ -248,7 +249,7 @@ export async function uploadFile(
   const jsonFile = new File(
     [
       JSON.stringify({
-        type: 'USER_DATA',
+        type: requestData.isImage ? 'VISION_DATA' : 'USER_DATA',
         agentId: '6812e64f9dfaf301f7000001',
         threadId: requestData.threadId,
       }),
