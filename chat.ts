@@ -53,80 +53,11 @@ export class Thread {
   readonly id: string
   #user: User
   #ws: WebSocket
-  #messageStreams: Map<string, ReadableStreamDefaultController<ChatResponseStream>>
-  #globalStream: ReadableStream<ChatResponseStream>
-  #globalReader: ReadableStreamDefaultReader<ChatResponseStream> | null = null
-
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
     this.#ws = ws
-    this.#messageStreams = new Map()
-
-    // Global Hyper Steam Management System™
-    this.#globalStream = new ReadableStream<ChatResponseStream>({
-      start: (controller) => {
-        this.#ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data) as ChatResponseStream
-            controller.enqueue(data)
-          } catch (error) {
-            controller.error(error)
-          }
-        }
-        this.#ws.onerror = (error) => {
-          controller.error(error)
-        }
-        this.#ws.onclose = () => {
-          controller.close()
-        }
-      },
-    })
-
-    this.#startDistributing()
   }
-
-  async #startDistributing() {
-    this.#globalReader = this.#globalStream.getReader()
-    try {
-      while (true) {
-        const { done, value } = await this.#globalReader.read()
-        if (done) break
-
-        if (value.webSocket.type === 'NOTIFICATION' || value.webSocket.type === 'ACK') {
-          continue
-        }
-
-        const messageId = value.webSocket.metadata.messageId
-
-        if (this.#messageStreams.has(messageId)) {
-          const controller = this.#messageStreams.get(messageId)!
-          controller.enqueue(value)
-
-          if (
-            (value.webSocket.payload.action === 'AI_ANSWER' ||
-              value.webSocket.payload.action === 'EVENT') &&
-            value.webSocket.payload.data.chatResponseStatus === 'DONE'
-          ) {
-            controller.close()
-            this.#messageStreams.delete(messageId)
-          }
-        }
-      }
-    } catch (error) {
-      for (const controller of this.#messageStreams.values()) {
-        controller.error(error)
-      }
-    } finally {
-      for (const controller of this.#messageStreams.values()) {
-        try {
-          controller.close()
-        } catch {}
-      }
-      this.#messageStreams.clear()
-    }
-  }
-
   static async connect(id: string, user: User): Promise<Thread> {
     const WS_PATH = `/ws/v1/chat?deviceId=${encodeURIComponent(user.deviceId)}`
     const url = await getSignedWsUrl(WS_PATH, user.accessToken)
@@ -151,22 +82,14 @@ export class Thread {
         }
     )[]
   }): AsyncGenerator<
+    | { type: 'ack' }
     | { type: 'text-delta'; text: string }
     | { type: 'reasoning-start' }
     | { type: 'reasoning-delta'; text: string }
     | { type: 'done' }
+    | { type: 'notification'; data: any }
   > {
     const messageId = crypto.randomUUID()
-
-    const stream = new ReadableStream<ChatResponseStream>({
-      start: (controller) => {
-        this.#messageStreams.set(messageId, controller)
-      },
-      cancel: () => {
-        this.#messageStreams.delete(messageId)
-      },
-    })
-
     this.#ws.send(
       JSON.stringify({
         message: {
@@ -218,12 +141,19 @@ export class Thread {
         },
       } satisfies ChatRequestMessage),
     )
-
-    const reader = stream.getReader()
-    try {
-      while (true) {
-        const { done, value: chunk } = await reader.read()
-        if (done) break
+    while (true) {
+      const chunk = await new Promise<ChatResponseStream>((resolve, reject) => {
+        this.#ws.onmessage = (event) => {
+          const data = JSON.parse(event.data) as ChatResponseStream
+          resolve(data)
+        }
+        this.#ws.onclose = (evt) => {
+          reject(evt)
+        }
+      })
+      if (chunk.webSocket.type === 'ACK') {
+        yield { type: 'ack' } as const
+      } else if (chunk.webSocket.type === 'CONVERSATION') {
         if (
           chunk.webSocket.payload.action === 'AI_ANSWER' ||
           chunk.webSocket.payload.action === 'EVENT'
@@ -281,16 +211,17 @@ export class Thread {
             chunk.webSocket,
           )
         }
+      } else if (chunk.webSocket.type === 'NOTIFICATION') {
+        yield {
+          type: 'notification',
+          data: chunk.webSocket.payload.data,
+        } as const
+      } else {
+        console.warn('Received non-conversation message:', chunk.webSocket)
       }
-    } finally {
-      reader.releaseLock()
-      this.#messageStreams.delete(messageId)
     }
   }
   [Symbol.dispose]() {
-    if (this.#globalReader) {
-      this.#globalReader.cancel()
-    }
     this.#ws.close()
   }
   close() {
