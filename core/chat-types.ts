@@ -128,29 +128,23 @@ export type ChatResponseStream = {
           }
         }
       }
-  /*
   | {
-      payload: {
-        data: {
-          type: 'ERROR',
-          metadata: {
-            messageId: string
-            traceId: string
-            timestamp: number
-          },
-          error: {
-            code: string // like number
-            message: string
-            trace: {
-              id: string
-              url: string // https://console.cloud.google.com/traces/explorer
-            },
-            threadId: string
-          }
-        }
+      type: 'ERROR',
+      metadata: {
+        messageId: string
+        traceId: string
+        timestamp: number
+      },
+      error: {
+        code: string // like number
+        message: string
+        trace: {
+          id: string
+          url: string // https://console.cloud.google.com/traces/explorer
+        },
+        threadId: string
       }
     }
-    */
 }
 
 export type ChatRequestMessage = {

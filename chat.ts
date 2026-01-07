@@ -157,7 +157,15 @@ export class Thread {
       }> }
     | { type: 'image-thumbnail'; url: string }
     | { type: 'image'; url: string }
-    | { type: 'error'; message: string }
+    | { type: 'error';
+        code: string;
+        message: string;
+        trace: {
+          id: string;
+          url: string;
+        };
+        threadId: string;
+      }
   > {
     const messageId = crypto.randomUUID()
     this.#ws.send(
@@ -301,6 +309,11 @@ export class Thread {
           type: 'notification',
           data: chunk.webSocket.payload.data,
         } as const
+      } else if (chunk.webSocket.type === 'ERROR') {
+        yield {
+          type: 'error',
+          ...chunk.webSocket.error,
+        }
       } else {
         console.warn('Received non-conversation message:', chunk.webSocket)
       }
