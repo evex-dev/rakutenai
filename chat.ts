@@ -60,13 +60,14 @@ export class Thread {
   #ws: WebSocket
   #stream: ReadableStream<ChatResponseStream>
   #streamReader: ReadableStreamDefaultReader<ChatResponseStream>
+  #timerId: NodeJS.Timeout
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
     this.#ws = ws
 
-    // 一時間後に自動でコンテキストを破棄
-    setTimeout(() => {
+    // 一時間ごとに自動でコンテキストを破棄
+    this.#timerId = setInterval(() => {
       this.close()
     }, 3600000) // 1時間 = 3600000 ms
 
@@ -328,6 +329,9 @@ export class Thread {
   [Symbol.dispose]() {
     this.#stream.cancel()
     this.#ws.close()
+    if (this.#timerId) {
+      clearInterval(this.#timerId)
+    }
   }
   close() {
     this[Symbol.dispose]()
