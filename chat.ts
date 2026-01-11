@@ -10,40 +10,74 @@ import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
 const DEFAULT_AGENT_ID = '6812e64f9dfaf301f7000001'
 
 export class User {
-  readonly accessToken: string
   readonly deviceId: string
+  #accessToken: string
+  get accessToken(): string {
+    return this.#accessToken
+  }
   constructor(deviceId: string, accessToken: string) {
-    this.accessToken = accessToken
     this.deviceId = deviceId
+    this.#accessToken = accessToken
   }
   static async create(): Promise<User> {
     const deviceId = generateDeviceID()
     const i = await fetchAnonymousToken(deviceId)
     return new User(deviceId, i.accessToken)
   }
+  async refreshToken(): Promise<void> {
+    const i = await fetchAnonymousToken(this.deviceId)
+    this.#accessToken = i.accessToken
+  }
   async createThread(opts?: { scenarioAgentId?: string; title?: string }): Promise<Thread> {
-    const thread = await createChatThread(this.deviceId, this.accessToken, {
-      scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
-      title: opts?.title ?? '新しいスレッド',
-    })
-    const connected = await Thread.connect(thread.id, this)
-    return connected
+    try {
+      const thread = await createChatThread(this.deviceId, this.accessToken, {
+        scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
+        title: opts?.title ?? '新しいスレッド',
+      })
+      const connected = await Thread.connect(thread.id, this)
+      return connected
+    } catch (err) {
+      // トークンが切れた可能性があるので、再認証して再試行
+      await this.refreshToken()
+      const thread = await createChatThread(this.deviceId, this.accessToken, {
+        scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
+        title: opts?.title ?? '新しいスレッド',
+      })
+      const connected = await Thread.connect(thread.id, this)
+      return connected
+    }
   }
   async uploadFile(opts: {
     file: File
     threadId?: string
     isImage?: boolean
   }): Promise<UploadedFile> {
-    const res = await uploadFile(this.deviceId, this.accessToken, {
-      file: opts.file,
-      threadId: opts.threadId ?? crypto.randomUUID(),
-      isImage: opts.isImage,
-    })
-    return {
-      fileId: res.fileId,
-      fileUrl: res.fileUrl,
-      fileName: res.originalFilename,
-      isImage: Boolean(opts.isImage),
+    try {
+      const res = await uploadFile(this.deviceId, this.accessToken, {
+        file: opts.file,
+        threadId: opts.threadId ?? crypto.randomUUID(),
+        isImage: opts.isImage,
+      })
+      return {
+        fileId: res.fileId,
+        fileUrl: res.fileUrl,
+        fileName: res.originalFilename,
+        isImage: Boolean(opts.isImage),
+      }
+    } catch (err) {
+      // トークンが切れた可能性があるので、再認証して再試行
+      await this.refreshToken()
+      const res = await uploadFile(this.deviceId, this.accessToken, {
+        file: opts.file,
+        threadId: opts.threadId ?? crypto.randomUUID(),
+        isImage: opts.isImage,
+      })
+      return {
+        fileId: res.fileId,
+        fileUrl: res.fileUrl,
+        fileName: res.originalFilename,
+        isImage: Boolean(opts.isImage),
+      }
     }
   }
 }
@@ -60,16 +94,10 @@ export class Thread {
   #ws: WebSocket
   #stream: ReadableStream<ChatResponseStream>
   #streamReader: ReadableStreamDefaultReader<ChatResponseStream>
-  #timerId: NodeJS.Timeout
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
     this.#ws = ws
-
-    // 一時間ごとに自動でコンテキストを破棄
-    this.#timerId = setInterval(() => {
-      this.close()
-    }, 3600000) // 1時間 = 3600000 ms
 
     this.#stream = new ReadableStream<ChatResponseStream>({
       start: async (controller) => {
@@ -117,13 +145,25 @@ export class Thread {
 
   static async connectWS(user: User): Promise<WebSocket> {
     const WS_PATH = `/ws/v1/chat?deviceId=${encodeURIComponent(user.deviceId)}`
-    const url = await getSignedWsUrl(WS_PATH, user.accessToken)
-    const ws = new WebSocket(url)
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => resolve()
-      ws.onerror = reject
-    })
-    return ws
+    try {
+      const url = await getSignedWsUrl(WS_PATH, user.accessToken)
+      const ws = new WebSocket(url)
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve()
+        ws.onerror = reject
+      })
+      return ws
+    } catch (err) {
+      // トークンが切れた可能性があるので、再認証して再試行
+      await user.refreshToken()
+      const url = await getSignedWsUrl(WS_PATH, user.accessToken)
+      const ws = new WebSocket(url)
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve()
+        ws.onerror = reject
+      })
+      return ws
+    }
   }
 
   static async connect(id: string, user: User): Promise<Thread> {
@@ -329,9 +369,6 @@ export class Thread {
   [Symbol.dispose]() {
     this.#stream.cancel()
     this.#ws.close()
-    if (this.#timerId) {
-      clearInterval(this.#timerId)
-    }
   }
   close() {
     this[Symbol.dispose]()
