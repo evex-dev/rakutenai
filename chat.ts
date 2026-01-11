@@ -65,6 +65,11 @@ export class Thread {
     this.#user = user
     this.#ws = ws
 
+    // 一時間後に自動でコンテキストを破棄
+    setTimeout(() => {
+      this.close()
+    }, 3600000) // 1時間 = 3600000 ms
+
     this.#stream = new ReadableStream<ChatResponseStream>({
       start: async (controller) => {
         while (true) {
