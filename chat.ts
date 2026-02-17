@@ -3,6 +3,7 @@ import {
   fetchAnonymousToken,
   generateDeviceID,
   getSignedWsUrl,
+  refreshAuthToken,
   uploadFile,
 } from './core/types'
 import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
@@ -10,22 +11,49 @@ import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
 const DEFAULT_AGENT_ID = '6812e64f9dfaf301f7000001'
 
 export class User {
-  readonly accessToken: string
+  accessToken: string
   readonly deviceId: string
-  constructor(deviceId: string, accessToken: string) {
+  #refreshToken: string
+  constructor(deviceId: string, accessToken: string, refreshToken: string) {
     this.accessToken = accessToken
     this.deviceId = deviceId
+    this.#refreshToken = refreshToken
   }
   static async create(): Promise<User> {
     const deviceId = generateDeviceID()
     const i = await fetchAnonymousToken(deviceId)
-    return new User(deviceId, i.accessToken)
+    return new User(deviceId, i.accessToken, i.refreshToken)
+  }
+  async refresh(): Promise<void> {
+    try {
+      const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken)
+      this.accessToken = tokens.accessToken
+      this.#refreshToken = tokens.refreshToken
+    } catch {
+      // リフレッシュ失敗時は新しい匿名トークンを取得
+      const tokens = await fetchAnonymousToken(this.deviceId)
+      this.accessToken = tokens.accessToken
+      this.#refreshToken = tokens.refreshToken
+    }
+  }
+  async #withTokenRefresh<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn()
+    } catch (err) {
+      if (err instanceof Error && (err.message.includes('Invalid token') || err.message.includes('HTTP Error 401'))) {
+        await this.refresh()
+        return await fn()
+      }
+      throw err
+    }
   }
   async createThread(opts?: { scenarioAgentId?: string; title?: string }): Promise<Thread> {
-    const thread = await createChatThread(this.deviceId, this.accessToken, {
-      scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
-      title: opts?.title ?? '新しいスレッド',
-    })
+    const thread = await this.#withTokenRefresh(() =>
+      createChatThread(this.deviceId, this.accessToken, {
+        scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
+        title: opts?.title ?? '新しいスレッド',
+      })
+    )
     const connected = await Thread.connect(thread.id, this)
     return connected
   }
@@ -34,11 +62,13 @@ export class User {
     threadId?: string
     isImage?: boolean
   }): Promise<UploadedFile> {
-    const res = await uploadFile(this.deviceId, this.accessToken, {
-      file: opts.file,
-      threadId: opts.threadId ?? crypto.randomUUID(),
-      isImage: opts.isImage,
-    })
+    const res = await this.#withTokenRefresh(() =>
+      uploadFile(this.deviceId, this.accessToken, {
+        file: opts.file,
+        threadId: opts.threadId ?? crypto.randomUUID(),
+        isImage: opts.isImage,
+      })
+    )
     return {
       fileId: res.fileId,
       fileUrl: res.fileUrl,
@@ -84,8 +114,15 @@ export class Thread {
                 try {
                   this.#ws = await Thread.connectWS(this.#user)
                   resolve()
-                } catch (err) {
-                  reject(err)
+                } catch {
+                  // トークン期限切れの場合、リフレッシュして再接続
+                  try {
+                    await this.#user.refresh()
+                    this.#ws = await Thread.connectWS(this.#user)
+                    resolve()
+                  } catch (err) {
+                    reject(err)
+                  }
                 }
               }
             })

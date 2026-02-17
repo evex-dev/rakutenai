@@ -141,6 +141,41 @@ export async function fetchAnonymousToken(
   return result.data
 }
 
+/** トークンのリフレッシュ */
+export async function refreshAuthToken(
+  deviceId: string,
+  refreshToken: string,
+): Promise<AuthTokens> {
+  const endpoint = '/api/v2/auth/refresh'
+  const url = `${BASE_URL}${endpoint}`
+
+  const signedHeaders = await getSignedHeaders('POST', endpoint)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Platform': 'WEB',
+      'X-Country-Code': 'JP',
+      'Device-ID': deviceId,
+      ...signedHeaders,
+    },
+    body: JSON.stringify({ refreshToken }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP Error: ${response.status}`)
+  }
+
+  const result = (await response.json()) as ApiResponse<AuthTokens>
+
+  if (result.code !== '0') {
+    throw new Error(result.message || 'Token Refresh Failed')
+  }
+
+  return result.data
+}
+
 const WS_BASE_URL = 'wss://companion.ai.rakuten.co.jp' // Br.wsBasePath
 
 /** WebSocket 用の署名生成 (mNe相当) */
