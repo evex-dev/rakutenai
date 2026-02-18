@@ -53,7 +53,7 @@ export class User {
     }
   }
   async #doRefresh(): Promise<void> {
-    const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken)
+    const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken).catch(() => fetchAnonymousToken(this.deviceId))
     this.#accessToken = tokens.accessToken
     this.#refreshToken = tokens.refreshToken
     if (tokens.expiresAt !== null) {
