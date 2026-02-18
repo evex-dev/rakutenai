@@ -14,6 +14,7 @@ interface AuthTokens {
   refreshToken: string
   idToken: string
   userType: string
+  expiresAt: number | null
 }
 
 // スレッド作成リクエストの型
@@ -131,14 +132,16 @@ export async function fetchAnonymousToken(
     throw new Error(`HTTP Error: ${response.status}`)
   }
 
-  const result = (await response.json()) as ApiResponse<AuthTokens>
+  const result = (await response.json()) as ApiResponse<Omit<AuthTokens, 'expiresAt'>>
 
   // 3. 業務エラーチェック (on.handle相当)
   if (result.code !== '0') {
     throw new Error(result.message || 'Authentication Failed')
   }
 
-  return result.data
+  const expires = response.headers.get('expires')
+  const expiresAt = expires ? new Date(expires).getTime() : null
+  return { ...result.data, expiresAt }
 }
 
 /** トークンのリフレッシュ */
@@ -167,13 +170,15 @@ export async function refreshAuthToken(
     throw new Error(`HTTP Error: ${response.status}`)
   }
 
-  const result = (await response.json()) as ApiResponse<AuthTokens>
+  const result = (await response.json()) as ApiResponse<Omit<AuthTokens, 'expiresAt'>>
 
   if (result.code !== '0') {
     throw new Error(result.message || 'Token Refresh Failed')
   }
 
-  return result.data
+  const expires = response.headers.get('expires')
+  const expiresAt = expires ? new Date(expires).getTime() : null
+  return { ...result.data, expiresAt }
 }
 
 const WS_BASE_URL = 'wss://companion.ai.rakuten.co.jp' // Br.wsBasePath

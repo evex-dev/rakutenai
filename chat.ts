@@ -15,18 +15,33 @@ export class User {
   readonly deviceId: string
   #refreshToken: string
   #refreshPromise: Promise<void> | null = null
+  #refreshTimer: ReturnType<typeof setTimeout> | null = null
   get accessToken(): string {
     return this.#accessToken
   }
-  constructor(deviceId: string, accessToken: string, refreshToken: string) {
+  constructor(deviceId: string, accessToken: string, refreshToken: string, expiresAt: number | null = null) {
     this.#accessToken = accessToken
     this.deviceId = deviceId
     this.#refreshToken = refreshToken
+    if (expiresAt !== null) {
+      this.#scheduleRefresh(expiresAt)
+    }
   }
   static async create(): Promise<User> {
     const deviceId = generateDeviceID()
     const i = await fetchAnonymousToken(deviceId)
-    return new User(deviceId, i.accessToken, i.refreshToken)
+    return new User(deviceId, i.accessToken, i.refreshToken, i.expiresAt)
+  }
+  #scheduleRefresh(expiresAt: number): void {
+    if (this.#refreshTimer !== null) {
+      clearTimeout(this.#refreshTimer)
+    }
+    // 有効期限の5分前にリフレッシュ (すでに5分以内なら即時)
+    const delay = Math.max(0, expiresAt - Date.now() - 5 * 60 * 1000)
+    this.#refreshTimer = setTimeout(() => {
+      this.#refreshTimer = null
+      this.refresh().catch(() => {})
+    }, delay)
   }
   async refresh(): Promise<void> {
     if (this.#refreshPromise) return this.#refreshPromise
@@ -38,15 +53,11 @@ export class User {
     }
   }
   async #doRefresh(): Promise<void> {
-    try {
-      const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken)
-      this.#accessToken = tokens.accessToken
-      this.#refreshToken = tokens.refreshToken
-    } catch {
-      // リフレッシュ失敗時は新しい匿名トークンを取得
-      const tokens = await fetchAnonymousToken(this.deviceId)
-      this.#accessToken = tokens.accessToken
-      this.#refreshToken = tokens.refreshToken
+    const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken)
+    this.#accessToken = tokens.accessToken
+    this.#refreshToken = tokens.refreshToken
+    if (tokens.expiresAt !== null) {
+      this.#scheduleRefresh(tokens.expiresAt)
     }
   }
   async #withTokenRefresh<T>(fn: () => Promise<T>): Promise<T> {
