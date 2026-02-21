@@ -3,6 +3,7 @@ import {
   fetchAnonymousToken,
   generateDeviceID,
   getSignedWsUrl,
+  refreshAuthToken,
   uploadFile,
 } from './core/types'
 import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
@@ -10,22 +11,73 @@ import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
 const DEFAULT_AGENT_ID = '6812e64f9dfaf301f7000001'
 
 export class User {
-  readonly accessToken: string
+  #accessToken: string
   readonly deviceId: string
-  constructor(deviceId: string, accessToken: string) {
-    this.accessToken = accessToken
+  #refreshToken: string
+  #refreshPromise: Promise<void> | null = null
+  #refreshTimer: ReturnType<typeof setTimeout> | null = null
+  get accessToken(): string {
+    return this.#accessToken
+  }
+  constructor(deviceId: string, accessToken: string, refreshToken: string, expiresAt: number | null = null) {
+    this.#accessToken = accessToken
     this.deviceId = deviceId
+    this.#refreshToken = refreshToken
+    if (expiresAt !== null) {
+      this.#scheduleRefresh(expiresAt)
+    }
   }
   static async create(): Promise<User> {
     const deviceId = generateDeviceID()
     const i = await fetchAnonymousToken(deviceId)
-    return new User(deviceId, i.accessToken)
+    return new User(deviceId, i.accessToken, i.refreshToken, i.expiresAt)
+  }
+  #scheduleRefresh(expiresAt: number): void {
+    if (this.#refreshTimer !== null) {
+      clearTimeout(this.#refreshTimer)
+    }
+    // 有効期限の5分前にリフレッシュ (すでに5分以内なら即時)
+    const delay = Math.max(0, expiresAt - Date.now() - 5 * 60 * 1000)
+    this.#refreshTimer = setTimeout(() => {
+      this.#refreshTimer = null
+      this.refresh().catch(() => {})
+    }, delay)
+  }
+  async refresh(): Promise<void> {
+    if (this.#refreshPromise) return this.#refreshPromise
+    this.#refreshPromise = this.#doRefresh()
+    try {
+      await this.#refreshPromise
+    } finally {
+      this.#refreshPromise = null
+    }
+  }
+  async #doRefresh(): Promise<void> {
+    const tokens = await refreshAuthToken(this.deviceId, this.#refreshToken).catch(() => fetchAnonymousToken(this.deviceId))
+    this.#accessToken = tokens.accessToken
+    this.#refreshToken = tokens.refreshToken
+    if (tokens.expiresAt !== null) {
+      this.#scheduleRefresh(tokens.expiresAt)
+    }
+  }
+  async #withTokenRefresh<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn()
+    } catch (err) {
+      if (err instanceof Error && (err.message.includes('Invalid token') || err.message.includes('HTTP Error 401'))) {
+        await this.refresh()
+        return await fn()
+      }
+      throw err
+    }
   }
   async createThread(opts?: { scenarioAgentId?: string; title?: string }): Promise<Thread> {
-    const thread = await createChatThread(this.deviceId, this.accessToken, {
-      scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
-      title: opts?.title ?? '新しいスレッド',
-    })
+    const thread = await this.#withTokenRefresh(() =>
+      createChatThread(this.deviceId, this.#accessToken, {
+        scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
+        title: opts?.title ?? '新しいスレッド',
+      })
+    )
     const connected = await Thread.connect(thread.id, this)
     return connected
   }
@@ -34,11 +86,13 @@ export class User {
     threadId?: string
     isImage?: boolean
   }): Promise<UploadedFile> {
-    const res = await uploadFile(this.deviceId, this.accessToken, {
-      file: opts.file,
-      threadId: opts.threadId ?? crypto.randomUUID(),
-      isImage: opts.isImage,
-    })
+    const res = await this.#withTokenRefresh(() =>
+      uploadFile(this.deviceId, this.#accessToken, {
+        file: opts.file,
+        threadId: opts.threadId ?? crypto.randomUUID(),
+        isImage: opts.isImage,
+      })
+    )
     return {
       fileId: res.fileId,
       fileUrl: res.fileUrl,
@@ -60,6 +114,8 @@ export class Thread {
   #ws: WebSocket
   #stream: ReadableStream<ChatResponseStream>
   #streamReader: ReadableStreamDefaultReader<ChatResponseStream>
+  #disposed = false
+  #pendingReject: ((err: unknown) => void) | null = null
   constructor(id: string, user: User, ws: WebSocket) {
     this.id = id
     this.#user = user
@@ -67,10 +123,11 @@ export class Thread {
 
     this.#stream = new ReadableStream<ChatResponseStream>({
       start: async (controller) => {
-        while (true) {
+        while (!this.#disposed) {
           try {
             // 現在のWSの終了を待機するPromiseを作成
             const closed = new Promise<void>((resolve, reject) => {
+              this.#pendingReject = reject
               // FIXME: 場合によっては初っ端のメッセージを取りこぼすけど知らない
               this.#ws.onmessage = (e) => {
                 try {
@@ -81,28 +138,52 @@ export class Thread {
               }
               this.#ws.onerror = reject
               this.#ws.onclose = async () => {
+                const oldWs = this.#ws
                 try {
                   this.#ws = await Thread.connectWS(this.#user)
-                  resolve()
-                } catch (err) {
-                  reject(err)
+                } catch {
+                  // WS接続失敗時にトークンリフレッシュを試行して再接続
+                  // NOTE: WS APIではHTTPステータスを取得できないため、
+                  // トークン期限切れ以外のエラーでもリフレッシュが走る
+                  try {
+                    await this.#user.refresh()
+                    this.#ws = await Thread.connectWS(this.#user)
+                  } catch (err) {
+                    reject(err)
+                    return
+                  }
                 }
+                // 旧WSのハンドラをクリーンアップ
+                oldWs.onmessage = null
+                oldWs.onerror = null
+                oldWs.onclose = null
+                resolve()
               }
             })
 
             await closed
+            this.#pendingReject = null
           } catch (err) {
+            this.#ws.onmessage = null
             this.#ws.onerror = null
             this.#ws.onclose = null
-            controller.error(err)
+            this.#pendingReject = null
+            if (!this.#disposed) {
+              controller.error(err)
+            }
             break
           }
         }
       },
       cancel: () => {
+        this.#disposed = true
+        this.#ws.onmessage = null
         this.#ws.onerror = null
         this.#ws.onclose = null
-        this.#ws.close() // 一心同体
+        this.#ws.close()
+        // awaitで停止中のPromiseを解放してwhileループを抜けさせる
+        this.#pendingReject?.(new Error('disposed'))
+        this.#pendingReject = null
       },
     })
 
