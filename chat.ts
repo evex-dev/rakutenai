@@ -294,7 +294,7 @@ export class Thread {
           ) {
             yield {
               type: 'tool-call',
-              data: chunk.webSocket.payload.data.contents // FIXME: types
+              data: chunk.webSocket.payload.data.contents
             }
           } else if (
             chunk.webSocket.payload.data.chatResponseStatus === 'DONE'
