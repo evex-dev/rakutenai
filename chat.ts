@@ -155,6 +155,11 @@ export class Thread {
         contentType: "TEXT" | "SUMMARY_TEXT";
         textData: { text: string; };
       }> }
+    | { type: 'tool-call-detail'; data: {
+      name: string
+      description: string
+      groupId: string
+      } }
     | { type: 'image-thumbnail'; url: string }
     | { type: 'image'; url: string }
     | { type: 'error';
@@ -242,42 +247,46 @@ export class Thread {
           if (
             chunk.webSocket.payload.data.chatResponseStatus === 'APPEND'
           ) {
-            const contents = chunk.webSocket.payload.data.contents
-            for (const content of contents) {
-              if (content.contentType === 'TEXT') {
-                if (chunk.webSocket.payload.action === 'EVENT') {
-                  if (content.textData.text === '思考中...') {
-                    yield {
-                      type: 'reasoning-start',
-                    } as const
+            if ('progressEvent' in chunk.webSocket.payload.data) {
+              yield { type: "tool-call-detail", data: chunk.webSocket.payload.data.progressEvent }
+            } else {
+              const contents = chunk.webSocket.payload.data.contents
+              for (const content of contents) {
+                if (content.contentType === 'TEXT') {
+                  if (chunk.webSocket.payload.action === 'EVENT') {
+                    if (content.textData.text === '思考中...') {
+                      yield {
+                        type: 'reasoning-start',
+                      } as const
+                      continue
+                    } else if (content.textData.text === '検索中...') {
+                      // skip
+                    }
                     continue
-                  } else if (content.textData.text === '検索中...') {
-                    // skip
                   }
-                  continue
+                  yield {
+                    type: 'text-delta',
+                    text: content.textData.text ?? '',
+                  } as const
+                } else if (content.contentType === 'SUMMARY_TEXT') {
+                  yield {
+                    type: 'reasoning-delta',
+                    text: content.textData.text ?? '',
+                  } as const
+                } else if (content.contentType === 'OUTPUT_IMAGE') {
+                  const img = content.outputImageData.imageGens[0]
+                  if(img) {
+                    yield { type: 'image-thumbnail', url: img.thumbnail }
+                    if(img.preview) yield { type: 'image', url: img.preview }
+                  }
+                } else {
+                  console.warn(
+                    '\n[Unsupported content type:',
+                    content.contentType,
+                    ']',
+                    content,
+                  )
                 }
-                yield {
-                  type: 'text-delta',
-                  text: content.textData.text ?? '',
-                } as const
-              } else if (content.contentType === 'SUMMARY_TEXT') {
-                yield {
-                  type: 'reasoning-delta',
-                  text: content.textData.text ?? '',
-                } as const
-              } else if (content.contentType === 'OUTPUT_IMAGE') {
-                const img = content.outputImageData.imageGens[0]
-                if(img) {
-                  yield { type: 'image-thumbnail', url: img.thumbnail }
-                  if(img.preview) yield { type: 'image', url: img.preview }
-                }
-              } else {
-                console.warn(
-                  '\n[Unsupported content type:',
-                  content.contentType,
-                  ']',
-                  content,
-                )
               }
             }
           } else if (

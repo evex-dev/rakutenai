@@ -92,6 +92,24 @@ export type ChatResponseStream = {
                 isStopped: boolean
                 timestamp: number
               }
+            | {
+                chatResponseType: 'EVENT'
+                chatResponseStatus: 'APPEND'
+                threadId: string
+                messageId: string
+                reqMessageId: string
+                language: 'ja'
+                trace: { id: string }
+                progressEvent: {
+                  name: 'web-search.start' | ({} & string)
+                  description: string
+                  groupId: 'web-search' | ({} & string)
+                }
+                chatLimitExceeded: boolean
+                retry: boolean
+                isStopped: boolean
+                timestamp: number
+              }
         }
       }
     | {
