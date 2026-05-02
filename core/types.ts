@@ -148,9 +148,9 @@ export async function fetchAnonymousToken(
   return { ...result.data, expiresAt }
 }
 
-// --- 追加: リフレッシュ API ---
 export async function refreshAuthToken(
   deviceId: string,
+  accessToken: string,
   refreshToken: string,
 ): Promise<AuthTokens> {
   const endpoint = '/api/v2/auth/refresh'
@@ -161,6 +161,7 @@ export async function refreshAuthToken(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,  // ★ 追加
       'X-Platform': 'WEB',
       'X-Country-Code': 'JP',
       'Device-ID': deviceId,

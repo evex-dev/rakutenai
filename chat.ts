@@ -50,6 +50,7 @@ export class User {
       try {
         const newTokens = await refreshAuthToken(
           this.deviceId,
+          this.accessToken,
           this.refreshToken,
         )
         this.accessToken = newTokens.accessToken
