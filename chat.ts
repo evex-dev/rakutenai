@@ -3,38 +3,83 @@ import {
   fetchAnonymousToken,
   generateDeviceID,
   getSignedWsUrl,
+  refreshAuthToken,
   uploadFile,
+  type AuthTokens,
 } from './core/types'
 import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
 
 const DEFAULT_AGENT_ID = '6812e64f9dfaf301f7000001'
 
 export class User {
-  readonly accessToken: string
+  private accessToken: string
+  private refreshToken: string
+  private expiresAt: number
   readonly deviceId: string
-  constructor(deviceId: string, accessToken: string) {
-    this.accessToken = accessToken
+  private refreshPromise: Promise<void> | null = null
+
+  private constructor(deviceId: string, tokens: AuthTokens) {
     this.deviceId = deviceId
+    this.accessToken = tokens.accessToken
+    this.refreshToken = tokens.refreshToken
+    this.expiresAt = tokens.expiresAt
   }
+
   static async create(): Promise<User> {
     const deviceId = generateDeviceID()
-    const i = await fetchAnonymousToken(deviceId)
-    return new User(deviceId, i.accessToken)
+    const tokens = await fetchAnonymousToken(deviceId)
+    return new User(deviceId, tokens)
   }
+
+  // 有効なアクセストークンを返す（必要ならリフレッシュ）
+  async getAccessToken(): Promise<string> {
+    // 有効期限の60秒前を切っていたらリフレッシュ
+    if (Date.now() >= this.expiresAt - 60_000) {
+      await this.#refreshAccessToken()
+    }
+    return this.accessToken
+  }
+
+  async #refreshAccessToken(): Promise<void> {
+    // 同時に複数のリフレッシュが走らないようにする
+    if (this.refreshPromise) {
+      return this.refreshPromise
+    }
+
+    this.refreshPromise = (async () => {
+      try {
+        const newTokens = await refreshAuthToken(
+          this.deviceId,
+          this.refreshToken,
+        )
+        this.accessToken = newTokens.accessToken
+        this.refreshToken = newTokens.refreshToken
+        this.expiresAt = newTokens.expiresAt
+      } finally {
+        this.refreshPromise = null
+      }
+    })()
+
+    return this.refreshPromise
+  }
+
   async createThread(opts?: { scenarioAgentId?: string; title?: string }): Promise<Thread> {
-    const thread = await createChatThread(this.deviceId, this.accessToken, {
+    const token = await this.getAccessToken()
+    const thread = await createChatThread(this.deviceId, token, {
       scenarioAgentId: opts?.scenarioAgentId ?? DEFAULT_AGENT_ID,
       title: opts?.title ?? '新しいスレッド',
     })
     const connected = await Thread.connect(thread.id, this)
     return connected
   }
+
   async uploadFile(opts: {
     file: File
     threadId?: string
     isImage?: boolean
   }): Promise<UploadedFile> {
-    const res = await uploadFile(this.deviceId, this.accessToken, {
+    const token = await this.getAccessToken()
+    const res = await uploadFile(this.deviceId, token, {
       file: opts.file,
       threadId: opts.threadId ?? crypto.randomUUID(),
       isImage: opts.isImage,
@@ -110,8 +155,9 @@ export class Thread {
   }
 
   static async connectWS(user: User): Promise<WebSocket> {
+    const token = await user.getAccessToken()
     const WS_PATH = `/ws/v1/chat?deviceId=${encodeURIComponent(user.deviceId)}`
-    const url = await getSignedWsUrl(WS_PATH, user.accessToken)
+    const url = await getSignedWsUrl(WS_PATH, token)
     const ws = new WebSocket(url)
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve()
