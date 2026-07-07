@@ -1,15 +1,11 @@
 # rakutenai
 
-To install dependencies:
+install
 
-```bash
-bun install
+```
+pnpm i jsr:@evex/rakutenai
 ```
 
-To run:
+## resources
 
-```bash
-bun run 
-```
-
-This project was created using `bun init` in bun v1.3.3. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+https://github.com/bukatuyametai/rakutenai_py : Python port
