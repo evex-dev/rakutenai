@@ -6,6 +6,11 @@ import {
   refreshAuthToken,
   uploadFile,
   type AuthTokens,
+  createShare,
+  getShare,
+  type CreateShareResponse,
+  type ShareData,
+  type ThreadData,
 } from './core/types'
 import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
 
@@ -382,5 +387,39 @@ export class Thread {
   }
   close() {
     this[Symbol.dispose]()
+  }
+
+  /** スレッドのメッセージを共有する */
+  async createShare(messageIds: string[]): Promise<CreateShareResponse> {
+    const token = await this.#user.getAccessToken()
+    return createShare(this.#user.deviceId, token, {
+      threadId: this.id,
+      messageIds,
+    })
+  }
+
+  /**
+   * 共有されたスレッドから新しいスレッドを作成する（fork）
+   * @param shareId 共有ID
+   * @param user ユーザーインスタンス
+   * @returns 新しく作成されたThreadインスタンス
+   */
+  static async fromShared(shareId: string, user: User): Promise<Thread> {
+    const token = await user.getAccessToken()
+
+    // 1. 共有データを取得してタイトルを取得
+    const shareData = await getShare(user.deviceId, token, shareId)
+    const originalTitle = shareData.title || 'Shared Thread'
+
+    // 2. 共有リンクから新しいスレッドを作成（fork）
+    const threadData = await createChatThread(user.deviceId, token, {
+      scenarioAgentId: shareData.scenarioAgentId,
+      title: `Continue: ${originalTitle}`,
+      shareableLinkId: shareId,
+      multipleThreadMode: true, // 常にtrue（暗黙的なfork）
+    })
+
+    // 3. WebSocketに接続してThreadインスタンスを作成
+    return Thread.connect(threadData.id, user)
   }
 }

@@ -23,16 +23,51 @@ interface CreateThreadRequest {
   title?: string // スレッドのタイトル（任意）
   sourceLanguage?: string // ソース言語 (例: "ja")
   targetLanguage?: string // ターゲット言語 (例: "en")
+  shareableLinkId?: string // 共有リンクからforkする場合のID
+  multipleThreadMode?: boolean // 複数スレッドモード
 }
 
 // スレッド情報の型
-interface ThreadData {
+export interface ThreadData {
   id: string
-  userId: string
+  threadId: string
+  userId?: string
   scenarioAgentId: string
+  scenarioAgentVersion?: string
+  scenarioAgentName?: {
+    en: string
+    ja: string
+    zh: string
+  }
+  scenarioAgentDescription?: string
+  scenarioAgentDisplayDescriptions?: {
+    en: string
+    ja: string
+    zh: string
+  }
+  scenarioAgentGreetingsMessage?: Record<string, any>
+  scenarioAgentIcon?: string
+  scenarioAgentMobileIcon?: string
+  scenarioAgentCreatedBy?: string
   title: string
+  subtitle?: string
+  pin?: boolean
+  lastOperationTime?: number
   createdAt: number
   updatedAt: number
+  allowedInputTypes?: Array<'TEXT_INPUT' | 'IMAGE_INPUT' | 'VOICE_INPUT'>
+  quickQuestions?: any[]
+  quickQuestionsMap?: {
+    ko: any[]
+    ja: any[]
+    en: any[]
+    zh: any[]
+  }
+  threadMode?: string
+  lastMessage?: string
+  isOfficial?: boolean
+  threadPolicy?: string
+  scenarioAgentThreadIcon?: string
 }
 
 export const generateDeviceID = () => {
@@ -245,6 +280,20 @@ export async function createChatThread(
   // メソッド、パス、(URLクエリ)パラメータ、時間、ノンスで構成されるのが一般的です。
   const signedHeaders = await getSignedHeaders('POST', endpoint)
 
+  // リクエストボディの組み立て
+  const body: any = {
+    scenarioAgentId: requestData.scenarioAgentId,
+  }
+  if (requestData.title) body.title = requestData.title
+  if (requestData.sourceLanguage) body.sourceLanguage = requestData.sourceLanguage
+  if (requestData.targetLanguage) body.targetLanguage = requestData.targetLanguage
+  if (requestData.shareableLinkId) {
+    body.shareableLinkId = requestData.shareableLinkId
+    body.multipleThreadMode = requestData.multipleThreadMode ?? true // デフォルトtrue
+    // 共有からforkする場合はタイトルに "Continue: " プレフィックスを付ける
+    if (!body.title) body.title = 'Continue: '
+  }
+
   // 3. fetch の実行
   const response = await fetch(url, {
     method: 'POST',
@@ -256,7 +305,7 @@ export async function createChatThread(
       'Device-ID': deviceId, // 以前定義した関数
       ...signedHeaders,
     },
-    body: JSON.stringify(requestData),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
@@ -337,6 +386,128 @@ export async function uploadFile(
   // 4. 業務エラーチェック
   if (result.code !== '0') {
     throw new Error(result.message || 'Failed to create thread')
+  }
+
+  return result.data
+}
+
+// 共有関連の型定義
+export interface CreateShareRequest {
+  threadId: string
+  messageIds: string[]
+}
+
+export interface CreateShareResponse {
+  shareId: string
+  shareUrl: string
+  title: string
+  alreadyExists: boolean
+  fullShareUrl: string
+}
+
+export interface ShareMessageContent {
+  id: string
+  role: 'user' | 'ai'
+  content: {
+    messageId: string
+    threadId: string
+    timestamp: number
+    [key: string]: any
+  }
+  deleted: boolean
+  createdAt: number
+  updatedAt: number
+  likeStatus: string
+  disableRetry: boolean
+  readOnly: boolean
+}
+
+export interface ShareData {
+  messageList: Array<{
+    id: string
+    threadId: string
+    messageList: ShareMessageContent[]
+    count: number
+    createdAt: number
+    updatedAt: number
+    readOnly: boolean
+  }>
+  title: string
+  shareId: string
+  shareUrl: string
+  scenarioAgentId: string
+  scenarioAgentIconUrl: string
+  scenarioAgentMobileIconUrl: string
+  threadMode: string
+}
+
+/** 共有リンクを作成する */
+export async function createShare(
+  deviceId: string,
+  token: string,
+  requestData: CreateShareRequest,
+): Promise<CreateShareResponse> {
+  const endpoint = '/api/v1/share/create'
+  const url = `${BASE_URL}${endpoint}`
+  const signedHeaders = await getSignedHeaders('POST', endpoint)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Platform': 'WEB',
+      'X-Country-Code': 'JP',
+      'Device-ID': deviceId,
+      ...signedHeaders,
+    },
+    body: JSON.stringify(requestData),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`HTTP Error ${response.status}: ${errorText}`)
+  }
+
+  const result = (await response.json()) as ApiResponse<CreateShareResponse>
+
+  if (result.code !== '0') {
+    throw new Error(result.message || 'Failed to create share')
+  }
+
+  return result.data
+}
+
+/** 共有されたスレッドを取得する */
+export async function getShare(
+  deviceId: string,
+  token: string,
+  shareId: string,
+): Promise<ShareData> {
+  const endpoint = `/api/v1/share/${shareId}`
+  const url = `${BASE_URL}${endpoint}`
+  const signedHeaders = await getSignedHeaders('GET', endpoint)
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Platform': 'WEB',
+      'X-Country-Code': 'JP',
+      'Device-ID': deviceId,
+      ...signedHeaders,
+    },
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`HTTP Error ${response.status}: ${errorText}`)
+  }
+
+  const result = (await response.json()) as ApiResponse<ShareData>
+
+  if (result.code !== '0') {
+    throw new Error(result.message || 'Failed to get share')
   }
 
   return result.data
