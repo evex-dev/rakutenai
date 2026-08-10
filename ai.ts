@@ -75,7 +75,7 @@ export const rakutenAI = (
               throw new Error('URL file is not supported yet')
             }
             const upload = await user.uploadFile({
-              file: new File([part.data], part.filename ?? 'unknown', {
+              file: new File([part.data as any], part.filename ?? 'unknown', { // FIXME
                 type: part.mediaType,
               }),
             })
