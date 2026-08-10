@@ -8,4 +8,10 @@ pnpm i jsr:@evex/rakutenai
 
 ## resources
 
-https://github.com/bukatuyametai/rakutenai_py : Python port
+### Python port
+
+https://github.com/bukatuyametai/rakutenai_py
+
+### Rust port?
+
+https://github.com/cjsfan/rakutenai.rs
