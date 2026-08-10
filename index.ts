@@ -1,8 +1,8 @@
-export * from './ai'
-export * from './chat'
+export * from './ai.ts'
+export * from './chat.ts'
 export type {
   CreateShareResponse,
   ShareData,
   ShareMessageContent,
   ThreadData,
-} from './core/types'
+} from './core/types.ts'

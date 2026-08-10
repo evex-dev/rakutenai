@@ -9,10 +9,8 @@ import {
   createShare,
   getShare,
   type CreateShareResponse,
-  type ShareData,
-  type ThreadData,
-} from './core/types'
-import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types'
+} from './core/types.ts'
+import type { ChatRequestMessage, ChatResponseStream } from './core/chat-types.ts'
 
 const DEFAULT_AGENT_ID = '6812e64f9dfaf301f7000001'
 
@@ -196,11 +194,11 @@ export class Thread {
         }
     )[]
   }): AsyncGenerator<
-    | { type: 'ack' }
+    | { type: 'ack'; messageId: string }
     | { type: 'text-delta'; text: string }
     | { type: 'reasoning-start' }
     | { type: 'reasoning-delta'; text: string }
-    | { type: 'done' }
+    | { type: 'done'; messageIds: string[] }
     | { type: 'notification'; data: any }
     | { type: 'disconnected' }
     | { type: 'tool-call'; data: Array<{
@@ -224,7 +222,8 @@ export class Thread {
         threadId: string;
       }
   > {
-    const messageId = crypto.randomUUID()
+    const userMessageId = crypto.randomUUID()
+    const messageIds: string[] = [userMessageId]
     this.#ws.send(
       JSON.stringify({
         message: {
@@ -236,7 +235,7 @@ export class Thread {
               role: 'user',
               userId: this.#user.deviceId,
               threadId: this.id,
-              messageId: messageId,
+              messageId: userMessageId,
               language: 'ja',
               platform: 'WEB',
               timestamp: Date.now(),
@@ -277,7 +276,7 @@ export class Thread {
             },
           },
           metadata: {
-            messageId: messageId,
+            messageId: userMessageId,
             timestamp: Date.now(),
           },
         },
@@ -290,7 +289,7 @@ export class Thread {
         return
       }
       if (chunk.webSocket.type === 'ACK') {
-        yield { type: 'ack' } as const
+        yield { type: 'ack', messageId: userMessageId } as const
       } else if (chunk.webSocket.type === 'CONVERSATION') {
         if (
           chunk.webSocket.payload.action === 'AI_ANSWER' ||
@@ -351,7 +350,12 @@ export class Thread {
           } else if (
             chunk.webSocket.payload.data.chatResponseStatus === 'DONE'
           ) {
-            yield { type: 'done' } as const
+            // AIメッセージIDを収集（実際のレスポンスから取得）
+            const aiMessageId = chunk.webSocket.payload.data.messageId
+            if (aiMessageId) {
+              messageIds.push(aiMessageId)
+            }
+            yield { type: 'done', messageIds: [...messageIds] } as const
             return
           } else {
             console.warn(

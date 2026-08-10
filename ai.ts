@@ -3,7 +3,7 @@ import type {
   LanguageModelV2,
   LanguageModelV2StreamPart,
 } from '@ai-sdk/provider'
-import { type Thread, User, type UploadedFile } from './chat'
+import { type Thread, User, type UploadedFile } from './chat.ts'
 
 export type RakutenAIModelId = 'ai-read' | 'deep-think' | 'normal'
 
