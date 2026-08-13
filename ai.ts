@@ -50,6 +50,8 @@ export const rakutenAI = (
       const user = providerOptions?.user ?? (await User.create())
       const thread = providerOptions?.thread ?? (await user.createThread())
 
+      let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+
       const response = thread.sendMessage({
         mode: (
           {
@@ -122,6 +124,12 @@ export const rakutenAI = (
                     delta: chunk.text,
                     id: '',
                   })
+                } else if (chunk.type === 'usage') {
+                  usage = {
+                    inputTokens: chunk.usage.inputTokens,
+                    outputTokens: chunk.usage.outputTokens,
+                    totalTokens: chunk.usage.inputTokens + chunk.usage.outputTokens,
+                  }
                 } else if (chunk.type === 'error') {
                   controller.error(new Error(chunk.message))
                   return
@@ -135,11 +143,7 @@ export const rakutenAI = (
                   controller.enqueue({
                     type: 'finish',
                     finishReason: 'stop',
-                    usage: {
-                      inputTokens: 0,
-                      outputTokens: 0,
-                      totalTokens: 0,
-                    },
+                    usage,
                   })
                 }
               }

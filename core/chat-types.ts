@@ -45,13 +45,29 @@ export type ChatResponseStream = {
                 threadId: string
                 messageId: string
                 reqMessageId: string
-                language: 'ja'
-                contents: {
-                  contentType: 'TEXT' | 'SUMMARY_TEXT'
-                  textData: {
-                    text: string
-                  }
-                }[]
+                language: string
+                contents: (
+                  | {
+                      contentType: 'TEXT' | 'SUMMARY_TEXT'
+                      textData: {
+                        text: string
+                      }
+                    }
+                  | {
+                      contentType: 'RESPONSE_METRICS'
+                      responseMetricsData: {
+                        metrics: {
+                          ttft: { llmMs: number; serverMs: number }
+                          totalResponseTime: { llmMs: number; serverMs: number }
+                        }
+                        usage: {
+                          inputTokens: number
+                          outputTokens: number
+                          cachedInputTokens?: number
+                        }
+                      }
+                    }
+                )[]
                 trace: {
                   id: string
                 }

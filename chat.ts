@@ -199,6 +199,7 @@ export class Thread {
     | { type: 'reasoning-start' }
     | { type: 'reasoning-delta'; text: string }
     | { type: 'done'; messageIds: string[] }
+    | { type: 'usage'; usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } }
     | { type: 'notification'; data: any }
     | { type: 'disconnected' }
     | { type: 'tool-call'; data: Array<{
@@ -330,6 +331,11 @@ export class Thread {
                     yield { type: 'image-thumbnail', url: img.thumbnail }
                     if(img.preview) yield { type: 'image', url: img.preview }
                   }
+                } else if (content.contentType === 'RESPONSE_METRICS') {
+                  yield {
+                    type: 'usage',
+                    usage: content.responseMetricsData.usage,
+                  } as const
                 } else {
                   console.warn(
                     '\n[Unsupported content type:',
