@@ -20,7 +20,7 @@ export const rakutenAI = (
   const fetch = opts?.fetch ?? globalThis.fetch.bind(globalThis)
 
   const cachedUploads = new WeakMap<
-    Omit<LanguageModelV2DataContent, string>,
+    Exclude<LanguageModelV2DataContent, string>,
     UploadedFile
   >()
 
@@ -74,10 +74,12 @@ export const rakutenAI = (
             if (part.data instanceof URL) {
               throw new Error('URL file is not supported yet')
             }
-            const upload = await user.uploadFile({
-              file: new File([part.data as any], part.filename ?? 'unknown', { // FIXME
+            const isImage = part.mediaType?.startsWith('image/') ?? false
+            const upload = await thread.uploadFile({
+              file: new File([part.data as any], part.filename ?? 'unknown', {
                 type: part.mediaType,
               }),
+              isImage,
             })
             if (typeof part.data !== 'string') {
               cachedUploads.set(part.data, upload)
@@ -120,6 +122,9 @@ export const rakutenAI = (
                     delta: chunk.text,
                     id: '',
                   })
+                } else if (chunk.type === 'error') {
+                  controller.error(new Error(chunk.message))
+                  return
                 } else if (chunk.type === 'done') {
                   if (isTextStarted) {
                     controller.enqueue({
@@ -143,6 +148,9 @@ export const rakutenAI = (
             } catch (err) {
               controller.error(err)
             }
+          },
+          async cancel(reason) {
+            thread.close()
           },
         }),
       }
