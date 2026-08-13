@@ -128,7 +128,9 @@ export class Thread {
                   reject(new Error('Failed to parse message'))
                 }
               }
-              this.#ws.onerror = reject
+              this.#ws.onerror = () => {
+                this.#ws.close()
+              }
               this.#ws.onclose = async () => {
                 try {
                   this.#ws = await Thread.connectWS(this.#user)
